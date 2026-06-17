@@ -1,94 +1,200 @@
-# PayyOSS_MVP_system_architecture
+# Payment Gateway Architecture
 
+## Complete Payment Flow
 
-# Payment Processing Flow
+```mermaid
+flowchart TD
 
-## Architecture Overview
+    M[Merchant Creates Payment]
+    PI[Payment Intent<br/>pi_123]
+    CS[Checkout Session<br/>cs_123]
 
-```text
-Merchant
-    │
-    ▼
-Payment Intent (pi_xxx)
-    │
-    ▼
-Checkout Session (cs_xxx)
-    │
-    ▼
-Checkout Page
-    │
-    ▼
-Wallet Connection
-    │
-    ▼
-Smart Contract Payment
-    │
-    ▼
-Blockchain Confirmation
-    │
-    ▼
-Gateway Verification
-    │
-    ▼
-Success / Cancel Redirect
+    U[Customer Opens Checkout]
+
+    API[Gateway API]
+
+    W[Wallet Connection<br/>MetaMask / WalletConnect]
+
+    N{Correct Network?}
+
+    SW[Switch Network]
+
+    PAY[Customer Clicks Pay]
+
+    SC[Smart Contract]
+
+    TX[Transaction Submitted<br/>txHash]
+
+    SUBMIT[POST /payments/submit]
+
+    BC[Blockchain Confirmation]
+
+    EVT[PaymentReceived Event]
+
+    LISTENER[NestJS Event Listener]
+
+    DB[(Database)]
+
+    POLL[Frontend Polling]
+
+    STATUS{Payment Status}
+
+    SUCCESS[Redirect Success URL]
+
+    CANCEL[Redirect Cancel URL]
+
+    M --> PI
+    PI --> CS
+
+    U --> API
+    API --> PI
+    API --> CS
+
+    U --> W
+
+    W --> N
+
+    N -- No --> SW
+    SW --> PAY
+
+    N -- Yes --> PAY
+
+    PAY --> SC
+
+    SC --> TX
+
+    TX --> SUBMIT
+
+    SUBMIT --> DB
+
+    TX --> BC
+
+    BC --> EVT
+
+    EVT --> LISTENER
+
+    LISTENER --> DB
+
+    U --> POLL
+
+    POLL --> STATUS
+
+    DB --> STATUS
+
+    STATUS -- Confirmed --> SUCCESS
+
+    STATUS -- Failed --> CANCEL
+
+    STATUS -- Expired --> CANCEL
 ```
 
 ---
 
-# Database Relationships
+# Database Architecture
 
-```text
-Merchant
-    │
-    │ 1:N
-    ▼
-Payment Intent
-    │
-    │ 1:1
-    ▼
-Checkout Session
-    │
-    │ 1:N
-    ▼
-Payments
+```mermaid
+erDiagram
+
+    MERCHANT ||--o{ PAYMENT_INTENT : creates
+
+    PAYMENT_INTENT ||--|| CHECKOUT_SESSION : owns
+
+    PAYMENT_INTENT ||--o{ PAYMENT : generates
+
+    MERCHANT {
+        string id
+        string walletAddress
+        string businessName
+    }
+
+    PAYMENT_INTENT {
+        string id
+        string merchantId
+        string amount
+        string amountRaw
+        number chainId
+        string tokenAddress
+        string tokenSymbol
+        number tokenDecimals
+        string status
+    }
+
+    CHECKOUT_SESSION {
+        string id
+        string paymentIntentId
+        string successUrl
+        string cancelUrl
+        string status
+    }
+
+    PAYMENT {
+        string id
+        string paymentIntentId
+        string payerWallet
+        string txHash
+        string status
+        datetime confirmedAt
+    }
 ```
 
 ---
 
-# Entity Responsibilities
+# Environment Architecture
 
-## Merchant
+```mermaid
+flowchart LR
 
-Stores merchant configuration.
+    ENV{Environment}
 
-```ts
-Merchant {
-  id
-  walletAddress
-  businessName
-}
+    ENV --> SANDBOX
+    ENV --> LIVE
+
+    SANDBOX[Sandbox]
+
+    SANDBOX --> S_CHAIN[Base Sepolia]
+    SANDBOX --> S_USDC[Test USDC]
+    SANDBOX --> S_CONTRACT[Test Contract]
+
+    LIVE[Production]
+
+    LIVE --> L_CHAIN[Base Mainnet]
+    LIVE --> L_USDC[Real USDC]
+    LIVE --> L_CONTRACT[Production Contract]
 ```
 
 ---
 
-## Payment Intent
+# Payment Lifecycle
 
-Represents what the customer must pay.
+```mermaid
+stateDiagram-v2
 
-```ts
-PaymentIntent {
-  id
-  merchantId
-  amount
-  amountRaw
-  chainId
-  tokenAddress
-  tokenSymbol
-  tokenDecimals
-  status
-  expiresAt
-}
+    [*] --> pending
+
+    pending --> submitted
+
+    submitted --> confirmed
+
+    submitted --> failed
+
+    pending --> expired
+
+    confirmed --> [*]
+
+    failed --> [*]
+
+    expired --> [*]
 ```
+
+---
+
+# Explanation
+
+## 1. Merchant Creates Payment
+
+The merchant creates a payment request through the gateway API.
+
+A Payment Intent is generated.
 
 Example:
 
@@ -101,252 +207,160 @@ Example:
 }
 ```
 
+The Payment Intent defines:
+
+- Amount
+- Token
+- Network
+- Merchant
+
 ---
 
-## Checkout Session
+## 2. Checkout Session Creation
 
-Represents a customer checkout experience.
-
-```ts
-CheckoutSession {
-  id
-  paymentIntentId
-  successUrl
-  cancelUrl
-  status
-}
-```
+The gateway creates a Checkout Session.
 
 Example:
 
 ```json
 {
   "id": "cs_123",
-  "paymentIntentId": "pi_123",
-  "successUrl": "https://merchant.com/success",
-  "cancelUrl": "https://merchant.com/cancel"
+  "paymentIntentId": "pi_123"
 }
 ```
 
----
+The Checkout Session stores:
 
-## Payments
-
-Represents actual blockchain transactions.
-
-```ts
-Payment {
-  id
-  paymentIntentId
-  payerWallet
-  txHash
-  status
-  confirmedAt
-}
-```
-
----
-
-# Checkout Flow
-
-## 1. Merchant Creates Payment
-
-```http
-POST /payment-intents
-```
-
-Gateway creates:
-
-```text
-pi_123
-```
-
----
-
-## 2. Gateway Creates Checkout Session
-
-```text
-cs_123
-```
-
-Linked to:
-
-```text
-pi_123
-```
+- Success URL
+- Cancel URL
+- Checkout status
 
 ---
 
 ## 3. Customer Opens Checkout
 
-```text
+Customer visits:
+
+```txt
 https://checkout.gateway.com/cs_123
 ```
 
-Frontend requests:
+Frontend requests checkout details from the gateway.
 
-```http
-GET /checkout-sessions/cs_123
-```
+Gateway returns:
 
-Response:
-
-```json
-{
-  "paymentIntentId": "pi_123",
-  "amount": "10",
-  "amountRaw": "10000000",
-
-  "chainId": 84532,
-
-  "tokenAddress": "0xUSDC",
-  "tokenSymbol": "USDC",
-  "tokenDecimals": 6,
-
-  "merchantWallet": "0xMerchant",
-
-  "successUrl": "https://merchant.com/success",
-  "cancelUrl": "https://merchant.com/cancel"
-}
-```
+- Payment Intent data
+- Merchant wallet
+- Success URL
+- Cancel URL
 
 ---
 
-## 4. Customer Connects Wallet
+## 4. Wallet Connection
 
-Supported:
+Customer connects:
 
 - MetaMask
 - Rabby
 - Coinbase Wallet
 - WalletConnect wallets
 
-Frontend verifies:
+The checkout validates:
 
 ```ts
 walletChainId === paymentIntent.chainId
 ```
 
-If mismatch:
-
-```ts
-await switchNetwork(paymentIntent.chainId);
-```
+If the customer is on the wrong network, a network switch is requested.
 
 ---
 
-## 5. Customer Clicks Pay
+## 5. Payment Submission
 
-Frontend calls smart contract:
+Customer clicks:
+
+```txt
+Pay Now
+```
+
+Frontend calls the smart contract:
 
 ```solidity
 pay(
-    paymentIntentId,
-    merchantWallet,
-    amountRaw
+  paymentIntentId,
+  merchantWallet,
+  amountRaw
 )
 ```
 
+The wallet displays a transaction approval screen.
+
 ---
 
-## 6. Wallet Approval
+## 6. Transaction Submitted
 
-### Approve
+After approval the wallet returns:
 
-Transaction submitted.
-
-Returns:
-
-```text
+```txt
 txHash
 ```
 
 Example:
 
-```text
+```txt
 0xabc123...
 ```
 
-### Reject
-
-Wallet returns error.
-
-Example:
-
-```json
-{
-  "code": 4001,
-  "message": "User rejected request"
-}
-```
-
-Result:
-
-```text
-Payment Cancelled
-Redirect -> cancelUrl
-```
-
----
-
-## 7. Submit Transaction To Gateway
-
-Frontend sends:
+Frontend sends the transaction hash to the gateway.
 
 ```http
 POST /payments/submit
 ```
 
-```json
-{
-  "paymentIntentId": "pi_123",
-  "txHash": "0xabc123..."
-}
-```
+The gateway stores:
 
-Gateway updates:
-
-```text
+```txt
 payments.status = submitted
 ```
 
 ---
 
-## 8. Blockchain Confirmation
+## 7. Blockchain Confirmation
 
-Smart contract emits:
+The transaction is mined.
+
+The payment contract emits:
 
 ```solidity
-event PaymentReceived(
-    string paymentIntentId,
-    address payer,
-    address merchant,
-    uint256 amount
-);
+PaymentReceived(
+    paymentIntentId,
+    payer,
+    merchant,
+    amount
+)
 ```
 
 ---
 
-## 9. Event Listener
+## 8. Event Processing
 
-NestJS listener receives event.
+A NestJS listener watches blockchain events.
 
-```text
+Flow:
+
+```txt
 Smart Contract
-      │
-      ▼
-PaymentReceived Event
-      │
-      ▼
+      ↓
+PaymentReceived
+      ↓
 NestJS Listener
-      │
-      ▼
+      ↓
 Database Update
 ```
 
 Updates:
 
-```text
+```txt
 payments.status = confirmed
 
 payment_intents.status = succeeded
@@ -354,9 +368,9 @@ payment_intents.status = succeeded
 
 ---
 
-## 10. Frontend Polling
+## 9. Frontend Polling
 
-Frontend periodically requests:
+The checkout periodically requests payment status.
 
 ```http
 GET /payments/status/pi_123
@@ -364,23 +378,17 @@ GET /payments/status/pi_123
 
 Possible responses:
 
-### Pending
-
 ```json
 {
   "status": "pending"
 }
 ```
 
-### Confirmed
-
 ```json
 {
   "status": "confirmed"
 }
 ```
-
-### Failed
 
 ```json
 {
@@ -390,107 +398,54 @@ Possible responses:
 
 ---
 
-## 11. Redirect Logic
+## 10. Redirect
 
-```text
-Confirmed
-    │
-    ▼
+When status becomes:
+
+### Confirmed
+
+Redirect:
+
+```txt
 successUrl
 ```
 
-```text
-Failed
-    │
-    ▼
+### Failed
+
+Redirect:
+
+```txt
 cancelUrl
 ```
 
-```text
-Expired
-    │
-    ▼
+### Expired
+
+Redirect:
+
+```txt
 cancelUrl
 ```
 
 ---
 
-# Sandbox Environment
+# Production Security Model
 
-```text
-Environment: Sandbox
+```txt
+Frontend NEVER confirms payments.
 
-Chain ID: 84532
-Token: Test USDC
-Contract: Test Contract
+Frontend NEVER marks payments as successful.
+
+Backend ONLY trusts:
+
+1. Smart Contract Events
+2. Blockchain Confirmation
+3. Verified Transaction Hashes
 ```
 
-Customer uses:
+This prevents:
 
-- Test ETH
-- Test USDC
+- Fake confirmations
+- Frontend manipulation
+- Client-side payment spoofing
 
-No real funds move.
-
----
-
-# Production Environment
-
-```text
-Environment: Live
-
-Chain ID: 8453
-Token: USDC
-Contract: Production Contract
-```
-
-Customer uses:
-
-- Real ETH
-- Real USDC
-
-Real funds move.
-
----
-
-# Final Production Flow
-
-```text
-Merchant
-    │
-    ▼
-Create Payment Intent
-    │
-    ▼
-Create Checkout Session
-    │
-    ▼
-Customer Opens Checkout
-    │
-    ▼
-Connect Wallet
-    │
-    ▼
-Network Validation
-    │
-    ▼
-Approve Transaction
-    │
-    ▼
-Smart Contract
-    │
-    ▼
-PaymentReceived Event
-    │
-    ▼
-NestJS Listener
-    │
-    ▼
-Update Payment Status
-    │
-    ▼
-Frontend Polling
-    │
-    ▼
-Success / Cancel Redirect
-```
+The blockchain remains the single source of truth.
